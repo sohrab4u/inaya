@@ -11,16 +11,9 @@ import sqlite3
 import bcrypt
 import re
 import os
+import shutil
 
-# Configure pdfkit to use wkhtmltopdf
-wkhtmltopdf_path = r"C:\Program Files\wkhtmltopdf\bin\wkhtmltopdf.exe"
-if os.path.exists(wkhtmltopdf_path):
-    pdfkit_config = pdfkit.configuration(wkhtmltopdf=wkhtmltopdf_path)
-else:
-    st.error(f"wkhtmltopdf not found at {wkhtmltopdf_path}. Please install wkhtmltopdf or update the path in app.py. See https://github.com/JazzCore/python-pdfkit/wiki/Installing-wkhtmltopdf.")
-    pdfkit_config = None
-
-# Set page configuration
+# Set page configuration as the first Streamlit command
 st.set_page_config(page_title="Inaya Cloth - Ladies Specialist", layout="wide")
 
 # Database Setup
@@ -28,6 +21,33 @@ Base = declarative_base()
 engine = create_engine("sqlite:///inaya_cloth.db", echo=False)
 Session = sessionmaker(bind=engine)
 session = Session()
+
+# Configure pdfkit to use wkhtmltopdf
+def configure_pdfkit():
+    wkhtmltopdf_path = shutil.which("wkhtmltopdf")  # Finds wkhtmltopdf in PATH
+    error_message = None
+    pdfkit_config = None
+
+    if not wkhtmltopdf_path:
+        # Try Windows-specific path
+        wkhtmltopdf_path = r"C:\Program Files\wkhtmltopdf\bin\wkhtmltopdf.exe"
+        if os.path.exists(wkhtmltopdf_path):
+            pdfkit_config = pdfkit.configuration(wkhtmltopdf=wkhtmltopdf_path)
+        else:
+            # Try Linux/Streamlit Cloud fallback path
+            wkhtmltopdf_path = "/usr/bin/wkhtmltopdf"
+            if os.path.exists(wkhtmltopdf_path):
+                pdfkit_config = pdfkit.configuration(wkhtmltopdf=wkhtmltopdf_path)
+            else:
+                error_message = (
+                    "wkhtmltopdf not found. PDF generation will be disabled. "
+                    "Please install wkhtmltopdf locally (see https://github.com/JazzCore/python-pdfkit/wiki/Installing-wkhtmltopdf). "
+                    "For Streamlit Cloud, add 'wkhtmltopdf' to packages.txt."
+                )
+    else:
+        pdfkit_config = pdfkit.configuration(wkhtmltopdf=wkhtmltopdf_path)
+
+    return pdfkit_config, error_message
 
 # Database Models
 class Stock(Base):
@@ -243,10 +263,8 @@ def migrate_database():
 # Perform migration
 migration_messages = migrate_database()
 
-if migration_messages:
-    with st.expander("Database Migration Log"):
-        for msg in migration_messages:
-            st.write(msg)
+# Configure pdfkit after database setup
+pdfkit_config, wkhtmltopdf_error = configure_pdfkit()
 
 # Initialize session state
 if "user" not in st.session_state:
@@ -306,6 +324,14 @@ def logout():
 
 # Main application
 def main_app():
+    if wkhtmltopdf_error:
+        st.warning(wkhtmltopdf_error)
+    
+    if migration_messages:
+        with st.expander("Database Migration Log"):
+            for msg in migration_messages:
+                st.write(msg)
+
     st.markdown("""
         <div style="background-color: #7E3F8F; color: white; padding: 20px; text-align: center;">
             <h1>Inaya Cloth - Ladies Specialist</h1>
@@ -680,7 +706,7 @@ def main_app():
                             <div style="font-family: Arial, sans-serif; width: 800px; margin: 0 auto; padding: 20px; border: 2px solid #7E3F8F;">
                                 <div style="text-align: center; margin-bottom: 20px;">
                                     <h1 style="color: #7E3F8F;">Inaya Cloth</h1>
-                                    <p style="font-size: 0.9em;">Ladies Specialist</p>
+                                <p style="font-size: 0.9em;">Ladies Specialist</p>
                                     <p style="font-size: 0.9em;">Thawe Road, Near SBI Bank, Rasul Market – 841428</p>
                                     <p style="font-size: 0.9em;">Mobile: 9936551234</p>
                                 </div>
@@ -1124,8 +1150,7 @@ def main_app():
                         stock = session.query(Stock).get(sale_item.stock_id)
                         total = item.quantity * stock.selling_price
                         grand_total += total
-                        items_html += (
-                            f"""
+                        items_html += f"""
                             <tr>
                                 <td style="padding: 10px;">{stock.name}</td>
                                 <td style="padding: 10px;">{item.quantity}</td>
@@ -1133,8 +1158,7 @@ def main_app():
                                 <td style="padding: 10px;">Rs. {stock.selling_price:.2f}</td>
                                 <td style="padding: 10px;">Rs. {total:.2f}</td>
                             </tr>
-                            """
-                        )
+                        """
                     customer_name = delivery.customer_name or "N/A"
                     customer_mobile = delivery.customer_mobile or "N/A"
                     customer_address = delivery.customer_address or "N/A"
